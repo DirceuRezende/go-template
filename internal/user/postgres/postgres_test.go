@@ -12,6 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/dirceurezende/user-template-go/internal/user"
 	"github.com/dirceurezende/user-template-go/internal/user/postgres"
@@ -188,5 +191,35 @@ func TestOutboxRelay(t *testing.T) {
 		`|{"userId":"` + id.String() + `","email":"ana@example.com","name":"Ana","occurredAt":"2026-01-01T12:00:00Z"}`
 	if len(producer.sent) != 1 || producer.sent[0] != want {
 		t.Fatalf("enviado = %q", producer.sent)
+	}
+}
+
+type ctxProducer struct{ got context.Context }
+
+func (p *ctxProducer) Produce(ctx context.Context, _, _ string, _ []byte) error {
+	p.got = ctx
+	return nil
+}
+
+func TestOutboxPropagatesTrace(t *testing.T) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	store := reset(t)
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    trace.TraceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+		SpanID:     trace.SpanID{1, 2, 3, 4, 5, 6, 7, 8},
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	e := user.WelcomeRequested{UserID: uuid.New(), Email: "ana@example.com", Name: "Ana", OccurredAt: time.Now()}
+	if err := store.WelcomeRequested(ctx, e); err != nil {
+		t.Fatal(err)
+	}
+
+	producer := &ctxProducer{}
+	if err := (postgres.Relay{Pool: pool, Producer: producer}).PublishPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := trace.SpanContextFromContext(producer.got).TraceID(); got != sc.TraceID() {
+		t.Fatalf("trace id no produce = %s, quer %s", got, sc.TraceID())
 	}
 }

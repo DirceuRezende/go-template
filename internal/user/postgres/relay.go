@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // Producer publica uma mensagem e só retorna depois do ack do broker. Implementado em kafka.
@@ -47,12 +49,13 @@ type outboxRow struct {
 	Topic   string
 	Key     string
 	Payload string
+	Trace   map[string]string // trace_context; nil em linhas antigas
 }
 
 // PublishPending publica um lote. SKIP LOCKED deixa várias instâncias rodarem o relay sem duplicar o lote.
 func (r Relay) PublishPending(ctx context.Context) error {
 	return pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
-		rows, _ := tx.Query(ctx, `SELECT id, topic, message_key, payload FROM outbox
+		rows, _ := tx.Query(ctx, `SELECT id, topic, message_key, payload, trace_context FROM outbox
 			WHERE published_at IS NULL ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED`, relayBatchSize)
 		pending, err := pgx.CollectRows(rows, pgx.RowToStructByPos[outboxRow])
 		if err != nil || len(pending) == 0 {
@@ -61,6 +64,7 @@ func (r Relay) PublishPending(ctx context.Context) error {
 		ids := make([]uuid.UUID, len(pending))
 		for i, m := range pending {
 			sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			sendCtx = otel.GetTextMapPropagator().Extract(sendCtx, propagation.MapCarrier(m.Trace))
 			err := r.Producer.Produce(sendCtx, m.Topic, m.Key, []byte(m.Payload))
 			cancel()
 			if err != nil {

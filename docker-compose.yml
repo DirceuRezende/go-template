@@ -28,5 +28,12 @@ services:
       timeout: 10s
       retries: 10
 
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.40.0   # collector OTLP + Tempo + Loki + Prometheus + Grafana num container só
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP (default do app)
+      - "3000:3000"   # Grafana (admin/admin)
+
 volumes:
   pgdata:

@@ -13,6 +13,7 @@ import (
 	"uuid"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"github.com/dirceurezende/user-template-go/internal/user"
 	"github.com/dirceurezende/user-template-go/internal/user/security"
@@ -21,8 +22,8 @@ import (
 // New monta as rotas. Públicas: cadastro, /api/auth/*, /openapi.yaml e /docs (Swagger UI); o resto exige Bearer.
 func New(svc *user.Service, tokens security.JWT) http.Handler {
 	r := gin.New()
-	r.ContextWithFallback = true // *gin.Context passa a ser o ctx da requisição (cancelamento chega no banco)
-	r.Use(gin.Recovery())
+	r.ContextWithFallback = true                               // *gin.Context passa a ser o ctx da requisição (cancelamento chega no banco)
+	r.Use(otelgin.Middleware("user-template"), gin.Recovery()) // otel primeiro: o span cobre até o panic recuperado
 	h := handler{svc}
 
 	r.GET("/openapi.yaml", func(c *gin.Context) { c.Data(http.StatusOK, "application/yaml", openapiSpec) })

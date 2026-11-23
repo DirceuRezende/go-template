@@ -13,6 +13,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/dirceurezende/user-template-go/internal/user"
 )
@@ -64,6 +66,7 @@ func ConsumerOpts(group string) []kgo.Opt {
 type Consumer struct {
 	Client  *kgo.Client
 	Service *user.Service
+	Tracer  *kotel.Tracer // o mesmo dos hooks do client; continua o trace vindo no header do record
 }
 
 // Run consome até o ctx ser cancelado.
@@ -78,9 +81,13 @@ func (c Consumer) Run(ctx context.Context) {
 			slog.WarnContext(ctx, "kafka: erro no fetch", "topic", topic, "partition", partition, "err", err)
 		})
 		fetches.EachRecord(func(r *kgo.Record) {
-			if err := c.handle(ctx, r.Value); err != nil {
-				slog.ErrorContext(ctx, "kafka: mensagem descartada", "topic", r.Topic, "offset", r.Offset, "err", err)
+			rctx, span := c.Tracer.WithProcessSpan(r)
+			if err := c.handle(rctx, r.Value); err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				slog.ErrorContext(rctx, "kafka: mensagem descartada", "topic", r.Topic, "offset", r.Offset, "err", err)
 			}
+			span.End()
 			c.Client.MarkCommitRecords(r)
 		})
 	}

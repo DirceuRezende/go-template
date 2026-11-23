@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
 
 	"github.com/dirceurezende/user-template-go/internal/user"
 	"github.com/dirceurezende/user-template-go/internal/user/httpapi"
@@ -38,6 +40,15 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	shutdownOTel, err := setupOTel(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownOTel(shutdownCtx) // descarrega o que ficou no buffer
+	}()
 	if cfg.Env != "dev" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -88,19 +99,30 @@ func newApp(ctx context.Context, cfg config, notifier user.Notifier) (_ *app, er
 			a.close()
 		}
 	}()
-	if a.pool, err = pgxpool.New(ctx, cfg.DatabaseURL); err != nil {
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	// shortcut: o polling do relay gera um trace raiz por SELECT do outbox (1/s), upgrade: sampler que descarte esses spans.
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	if a.pool, err = pgxpool.NewWithConfig(ctx, poolCfg); err != nil {
+		return nil, err
+	}
+	if err = otelpgx.RecordStats(a.pool); err != nil {
 		return nil, err
 	}
 	if err = postgres.Migrate(ctx, a.pool); err != nil {
 		return nil, err
 	}
-	if a.producer, err = kgo.NewClient(kgo.SeedBrokers(cfg.KafkaBrokers...)); err != nil {
+	tracer := kotel.NewTracer()
+	hooks := kgo.WithHooks(kotel.NewKotel(kotel.WithTracer(tracer), kotel.WithMeter(kotel.NewMeter())).Hooks()...)
+	if a.producer, err = kgo.NewClient(kgo.SeedBrokers(cfg.KafkaBrokers...), hooks); err != nil {
 		return nil, err
 	}
 	if err = kafka.EnsureTopics(ctx, a.producer); err != nil {
 		return nil, err
 	}
-	opts := append(kafka.ConsumerOpts("user-template"), kgo.SeedBrokers(cfg.KafkaBrokers...))
+	opts := append(kafka.ConsumerOpts("user-template"), kgo.SeedBrokers(cfg.KafkaBrokers...), hooks)
 	if a.consumer, err = kgo.NewClient(opts...); err != nil {
 		return nil, err
 	}
@@ -113,7 +135,7 @@ func newApp(ctx context.Context, cfg config, notifier user.Notifier) (_ *app, er
 	}
 	a.handler = httpapi.New(a.service, jwt)
 	a.relay = postgres.Relay{Pool: a.pool, Producer: kafka.Producer{Client: a.producer}, Interval: cfg.OutboxInterval}
-	a.listener = kafka.Consumer{Client: a.consumer, Service: a.service}
+	a.listener = kafka.Consumer{Client: a.consumer, Service: a.service, Tracer: tracer}
 	return a, nil
 }
 

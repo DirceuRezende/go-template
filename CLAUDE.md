@@ -28,4 +28,5 @@ Veja o `Makefile`. Uma tarefa está pronta quando `make check` (lint + todos os 
 - Gin: `r.ContextWithFallback = true` faz o `*gin.Context` valer como ctx da requisição; passe `c` para o `Service`.
 - Migrations em `internal/user/postgres/migrations` (goose, embutidas, aplicadas no startup). Migration aplicada nunca é editada: crie a próxima.
 - O módulo Kafka do testcontainers-go só aceita imagens Confluent; o e2e usa `confluentinc/confluent-local`, o compose usa `apache/kafka`.
+- OpenTelemetry é configurado em `cmd/api/otel.go`, chamado só no `run`: testes e `newApp` ficam com providers noop. O contexto do trace passa pelo outbox na coluna `trace_context` (postgres) e não pelo núcleo.
 - O compose tem `name: user-template-go` e usa as portas 5432/9092, as mesmas do template Java: pare um antes de subir o outro.

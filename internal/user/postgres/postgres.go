@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/dirceurezende/user-template-go/internal/user"
 )
@@ -186,7 +188,9 @@ func (s *Store) WelcomeRequested(ctx context.Context, e user.WelcomeRequested) e
 		return err
 	}
 	// chave = userId: mensagens do mesmo usuário caem na mesma partição, em ordem
-	_, err = s.q.Exec(ctx, `INSERT INTO outbox (id, topic, message_key, payload, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		uuid.New(), WelcomeTopic, e.UserID.String(), string(payload), e.OccurredAt)
+	trace := propagation.MapCarrier{} // contexto do trace da requisição; o Relay o devolve ao Kafka
+	otel.GetTextMapPropagator().Inject(ctx, trace)
+	_, err = s.q.Exec(ctx, `INSERT INTO outbox (id, topic, message_key, payload, created_at, trace_context) VALUES ($1, $2, $3, $4, $5, $6)`,
+		uuid.New(), WelcomeTopic, e.UserID.String(), string(payload), e.OccurredAt, map[string]string(trace))
 	return err
 }

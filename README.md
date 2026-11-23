@@ -3,7 +3,7 @@
 Template de referência com um agregado `User`, autenticação JWT + refresh token e mensageria com Kafka (Transactional Outbox). Mesmo contrato HTTP, mesmo schema e mesmo evento dos templates Java (Spring) e NestJS; a implementação segue o jeito Go.
 
 ```bash
-make up      # Postgres 17 (5432) + Kafka (9092)
+make up      # Postgres 17 (5432) + Kafka (9092) + Grafana LGTM (OTLP 4317/4318, UI 3000)
 make run     # APP_ENV=dev: segredo JWT de dev + admin admin@example.com / admin12345, porta 8080
 make check   # lint (inclui a regra de arquitetura) + todos os testes (precisa do Docker)
 ```
@@ -65,6 +65,17 @@ internal/user/           ← núcleo: só stdlib (depguard)
 | `JWT_SECRET` | obrigatório fora de dev, ≥ 32 bytes |
 | `ACCESS_TTL` / `REFRESH_TTL` | `15m` / `168h` |
 | `OUTBOX_POLL_INTERVAL` | `1s` |
+| `OTEL_SERVICE_NAME` | `user-template` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` (OTLP http) |
+| `OTEL_TRACES_EXPORTER` / `OTEL_METRICS_EXPORTER` / `OTEL_LOGS_EXPORTER` | `otlp` (`none` desliga; `console` imprime) |
+
+## Observabilidade (OpenTelemetry)
+
+`cmd/api/otel.go` registra traces, métricas e logs (slog → OTel, além do stderr); os exporters seguem as env `OTEL_*` padrão. Instrumentado: HTTP (`otelgin`), Postgres (`otelpgx`, inclusive stats do pool) e Kafka (`kotel`). Com `make up`, abra o Grafana em http://localhost:3000 → Explore (Tempo, Loki, Prometheus).
+
+O trace atravessa o outbox: `Store.WelcomeRequested` grava o `traceparent` da requisição em `outbox.trace_context`, o relay o devolve ao contexto do produce e o `kotel` o leva no header do record até o consumer. O pedido de welcome e o envio aparecem num trace só. A coluna `trace_context` não existe no schema dos templates Java/NestJS.
+
+**Limites conhecidos:** o polling do relay gera um trace por SELECT do outbox (1/s); o log no stderr não mostra trace_id (o que vai ao OTel tem).
 
 ## Segurança
 
@@ -111,4 +122,4 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 
 - Lock otimista (coluna de versão) quando houver updates concorrentes no mesmo usuário.
 - Segunda feature: novo pacote em `internal/<feature>` com a mesma forma, e uma regra `depguard` para o núcleo dela.
-- Observabilidade (tracing/metrics) e health check não estão no template.
+- Health check não está no template.
