@@ -240,3 +240,24 @@ func TestDeletedUserCannotLoginOrRefresh(t *testing.T) {
 	expect(t, a.do("POST", "/api/auth/refresh", "", `{"refreshToken":"`+ana.refresh+`"}`), 401)
 	expect(t, a.do("POST", "/api/auth/login", "", `{"email":"ana@example.com","password":"secret123"}`), 401)
 }
+
+// TestOpenAPICoversRoutes falha se uma rota /api existir sem a operação correspondente no openapi.yaml.
+func TestOpenAPICoversRoutes(t *testing.T) {
+	a := newAPI(t)
+	rec := a.do("GET", "/openapi.yaml", "", "")
+	expect(t, rec, 200)
+	spec := rec.Body.String()
+	expect(t, a.do("GET", "/docs", "", ""), 200)
+
+	for _, r := range a.handler.(*gin.Engine).Routes() {
+		if !strings.HasPrefix(r.Path, "/api/") {
+			continue
+		}
+		path := strings.ReplaceAll(r.Path, ":id", "{id}")
+		_, block, ok := strings.Cut(spec, "\n  "+path+":\n")
+		block, _, _ = strings.Cut(block, "\n  /") // até o próximo path
+		if !ok || !strings.Contains("\n"+block, "\n    "+strings.ToLower(r.Method)+":\n") {
+			t.Errorf("openapi.yaml sem %s %s", r.Method, path)
+		}
+	}
+}

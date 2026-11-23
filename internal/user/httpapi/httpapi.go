@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	_ "embed"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -17,12 +18,15 @@ import (
 	"github.com/dirceurezende/user-template-go/internal/user/security"
 )
 
-// New monta as rotas. Públicas: cadastro e /api/auth/*; o resto exige Bearer.
+// New monta as rotas. Públicas: cadastro, /api/auth/*, /openapi.yaml e /docs (Swagger UI); o resto exige Bearer.
 func New(svc *user.Service, tokens security.JWT) http.Handler {
 	r := gin.New()
 	r.ContextWithFallback = true // *gin.Context passa a ser o ctx da requisição (cancelamento chega no banco)
 	r.Use(gin.Recovery())
 	h := handler{svc}
+
+	r.GET("/openapi.yaml", func(c *gin.Context) { c.Data(http.StatusOK, "application/yaml", openapiSpec) })
+	r.GET("/docs", func(c *gin.Context) { c.Data(http.StatusOK, "text/html; charset=utf-8", swaggerUI) })
 
 	api := r.Group("/api")
 	api.POST("/users", h.register)
@@ -38,6 +42,28 @@ func New(svc *user.Service, tokens security.JWT) http.Handler {
 	private.POST("/users/:id/welcome", selfOrAdmin, h.welcome)
 	return r
 }
+
+// openapiSpec é escrito à mão; TestOpenAPICoversRoutes garante que cobre toda rota /api.
+//
+//go:embed openapi.yaml
+var openapiSpec []byte
+
+// swaggerUI carrega o Swagger UI do CDN apontando para /openapi.yaml.
+// shortcut: depende do CDN (sem internet não abre), upgrade: servir os assets do swagger-ui-dist embutidos.
+var swaggerUI = []byte(`<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>user-template API</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#swagger-ui" });</script>
+</body>
+</html>`)
 
 type handler struct{ svc *user.Service }
 
