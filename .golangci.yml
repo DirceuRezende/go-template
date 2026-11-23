@@ -1,0 +1,26 @@
+# go tool golangci-lint run  (ou: make lint)
+version: "2"
+linters:
+  enable:
+    - depguard
+    - errorlint
+  settings:
+    depguard:
+      rules:
+        # Hexagonal: o núcleo (internal/user, sem subpacotes) só usa a stdlib.
+        # Banco, HTTP, Kafka, JWT, bcrypt... ficam nos subpacotes (adapters).
+        core:
+          list-mode: strict
+          files:
+            - "**/internal/user/*.go"
+            - "!$test"
+          allow:
+            - $gostd
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/dirceurezende/user-template-go
