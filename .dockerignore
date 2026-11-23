@@ -4,3 +4,4 @@
 api.http
 docker-compose.yml
 Dockerfile
+.env

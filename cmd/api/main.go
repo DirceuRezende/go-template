@@ -36,6 +36,9 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	if err := loadDotEnv(".env"); err != nil {
+		return err
+	}
 	cfg, err := loadConfig()
 	if err != nil {
 		return err

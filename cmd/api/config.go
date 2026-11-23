@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -63,4 +64,39 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// loadDotEnv aplica KEY=VALUE de path no ambiente; variável já definida no ambiente vence.
+// Arquivo ausente não é erro (produção usa o ambiente de verdade).
+// shortcut: sem interpolação ${VAR} nem valor multilinha, upgrade: github.com/joho/godotenv.
+func loadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck // só leitura
+	sc := bufio.NewScanner(f)
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			return fmt.Errorf("%s:%d: esperado KEY=VALUE", path, n)
+		}
+		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
+			val = val[1 : len(val)-1]
+		}
+		if _, set := os.LookupEnv(key); !set {
+			if err := os.Setenv(key, val); err != nil {
+				return err
+			}
+		}
+	}
+	return sc.Err()
 }

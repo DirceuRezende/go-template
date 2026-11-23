@@ -56,6 +56,8 @@ internal/user/           ← núcleo: só stdlib (depguard)
 
 ## Configuração
 
+Variáveis de ambiente. Para dev local: `cp .env.example .env`; o `run` carrega o `.env` se existir (o ambiente vence o arquivo).
+
 | Variável | Default |
 |---|---|
 | `APP_ENV` | vazio (`dev` liga segredo e admin de dev) |
