@@ -1,0 +1,6 @@
+.git
+.claude
+*.md
+api.http
+docker-compose.yml
+Dockerfile
